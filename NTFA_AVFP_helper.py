@@ -166,8 +166,62 @@ def load_sub_log_info(subjects,log_file_headers,log_path):
     return task_lines         
     
     
+
+# extract embeddings:    
+def fetch_embeddings_v1(): 
+    hyperparams = dtfa.variational.hyperparams.state_vardict()
+    tasks = dtfa.tasks()
+    subjects = dtfa.subjects()
+    z_p_mu = hyperparams['subject_weight']['mu'].data
+    z_s_mu = hyperparams['task']['mu'].data
+
+    z_ps_mu, combinations = list(), list()
+    for p in range(len(subjects)):
+        # because I coded by memory, participants only have 1/2 of the unqiue tasks each - find index:
+        sub_tasks = [b['task'] for b in avfp_db.blocks.values() if b['subject'] == subjects[p]]
+        combinations.append(np.vstack([np.repeat(subjects[p],len(sub_tasks)), np.array(sub_tasks)]))
+        for t in range(len(sub_tasks)):
+            task_index = [i for i, e in enumerate(tasks) if e == sub_tasks[t]]
+            joint_embed = torch.cat((z_p_mu[p], z_s_mu[task_index[0]]), dim=-1)
+            interaction_embed = dtfa.decoder.interaction_embedding(joint_embed).data
+            z_ps_mu.append(interaction_embed.data.numpy())
+    z_ps_mu = np.vstack(z_ps_mu)   
+    combinations = np.hstack(combinations).T  
+
+    # convert to dataframes
+    z_p = pd.DataFrame(np.hstack([np.reshape(subjects, (len(subjects),1)), z_p_mu.numpy()]),
+                       columns=['participant','x','y'])
+    z_s = pd.DataFrame(np.hstack([np.reshape(tasks, (len(tasks),1)), z_s_mu.numpy()]),
+                       columns=['stimulus','x','y'])
+    z_ps = pd.DataFrame(np.hstack([combinations, z_ps_mu]),
+                        columns=['participant','stimulus','x','y'])
+    return z_p, z_s, z_ps
+
+
+def fetch_embeddings_v2(): 
+    hyperparams = dtfa.variational.hyperparams.state_vardict()
+    tasks = dtfa.tasks()
+    subjects = dtfa.subjects()
+    interactions = dtfa._interactions
+    z_p_mu = hyperparams['subject_weight']['mu'].data
+    z_s_mu = hyperparams['task']['mu'].data
+    z_i_mu = hyperparams['interaction']['mu'].data
     
-    
+    z_p_sigma = torch.exp(hyperparams['subject_weight']['log_sigma'].data)
+    z_s_sigma = torch.exp(hyperparams['task']['log_sigma'].data)
+    z_i_sigma = torch.exp(hyperparams['interaction']['log_sigma'].data)
+
+    # convert to dataframes
+    z_p = pd.DataFrame(np.hstack([np.reshape(subjects, (len(subjects),1)), z_p_mu.numpy(), z_p_sigma.numpy()]),
+                       columns=['participant','x','y', 'x_sigma','y_sigma'])
+    z_s = pd.DataFrame(np.hstack([np.reshape(tasks, (len(tasks),1)), z_s_mu.numpy(), z_s_sigma.numpy()]),
+                       columns=['stimulus','x','y', 'x_sigma', 'y_sigma'])
+    z_ps = pd.DataFrame(np.hstack([interactions, z_i_mu.numpy(), z_i_sigma.numpy()]),
+                        columns=['participant','stimulus','x','y', 'x_sigma', 'y_sigma'])
+    return z_p, z_s, z_ps
+
+
+
 # for modeling
 def GetEmbeddingXY(embedding, s,cv_column, x = 'psc', which_y = 'fear_rating'):
     x_columns = []
